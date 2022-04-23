@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "python": "C:/Program Files/Side Effects Software/Houdini 19.0.589/python37/python3.7.exe",
+            "env": {
+               "PYTHONPATH": "C:/Program Files/Side Effects Software/Houdini 19.0.589/python37/libs/;C:/Program Files/Side Effects Software/Houdini 19.0.589/houdini/python3.7libs/"
+            }
+        },
+    ]
+}
