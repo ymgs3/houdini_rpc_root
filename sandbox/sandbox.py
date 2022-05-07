@@ -5,6 +5,7 @@ if not 'HFS' in os.environ:
     try:
         import hrpyc
         connection, hou = hrpyc.import_remote_module()
+        stroketoolutils = connection.modules["stroketoolutils"]
     except:
         # 最後に定義されているhouのautocompleteが効くみたいなので例外側でインポート　
         import hou
