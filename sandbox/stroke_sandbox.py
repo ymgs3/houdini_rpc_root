@@ -17,7 +17,6 @@ else:
     import sidefx_stroke
     import viewerstate.utils as su
 
-
 hou.hipFile.clear(True)
 
 #実データ部分
@@ -30,12 +29,17 @@ data.proj_success=True # hit
 #data.tilt = 90.0
 #data.pos = hou.Vector3(0.6,0.6,0.6) # orig
 #data.time = 1.0
-pos = [0.9,0.6,0.0]
+
+
+xform1 = hou.hmath.buildRotate(0, 0, -45)
+direction = hou.Vector3(1,0,0) * xform1
+pos = hou.Vector3(0,1,0)
+scale = 0.3
+
 for i in range(num):
-    data.proj_pos = hou.Vector3(pos) # P
+    data.proj_pos = pos # P
     mirrorData.add(data.encode(), su.ByteStream)
-    pos[0] = pos[0] + 0.3
-    pos[1] = pos[1] - 0.3
+    pos += direction*scale
 
 
 stream = su.ByteStream()
