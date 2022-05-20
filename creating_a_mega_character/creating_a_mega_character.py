@@ -7,17 +7,21 @@ if not 'HFS' in os.environ:
         connection, hou = hrpyc.import_remote_module()
         sidefx_stroke = connection.modules["sidefx_stroke"]
         su = connection.modules["viewerstate.utils"]
+        #rpcのhouの値を使うとエラーが出る
+        update_mode = connection.modules["hou"].updateMode.Manual
     except:
         # 最後に定義されているhouのautocompleteが効くみたいなので例外側でインポート　
         import hou
         import sidefx_stroke
         import viewerstate.utils as su
+        update_mode = hou.updateMode.Manual
 else:
     import hou
     import sidefx_stroke
     import viewerstate.utils as su
 # https://www.youtube.com/playlist?list=PLXNFA1EysfYmpOEGcK1x_r6g_h2dOwAC4
 
+# ストローク作成ヘルパ
 def create_stroke_raw_data(pos:list):
     mirrorData = su.ByteStream()
 
@@ -39,6 +43,12 @@ def create_stroke_raw_data(pos:list):
 
 
 hou.hipFile.clear(True)
+
+#更新モードを変更
+current_update_mode = hou.updateModeSetting()
+hou.setUpdateMode(update_mode)
+hou.updateModeSetting()
+
 
 geo:hou.Node = hou.node("/obj").createNode('geo')
 
@@ -233,7 +243,9 @@ paintsdfvolume_nose.setParms(
 eye_black:hou.Node  = geo.createNode('sphere')
 eye_black.setParms({
     "type":2,
-    "scale":0.6
+    "scale":0.6,
+    "rows":50,
+    "cols":50,
 })
 
 eye_black_xform:hou.Node  = geo.createNode('xform')
@@ -254,7 +266,9 @@ eye_black_color.setInput(0,eye_black_xform)
 
 eye_white:hou.Node  = geo.createNode('sphere')
 eye_white.setParms({
-    "type":2
+    "type":2,
+    "rows":50,
+    "cols":50,
 })
 eye_white_color:hou.Node  = geo.createNode('color')
 eye_white_color.setParms(
@@ -348,6 +362,76 @@ convertvdb.setParms(
 )
 convertvdb.setInput(0,vdbsmooth)
 
+# 目のへこみ
+dent_nodes = []
+null_dented:hou.Node  = geo.createNode('null',"DENTED")
+null_dented.setInput(0,vdbsmooth)
+dent_nodes.append(null_dented)
+
+null_denter:hou.Node  = geo.createNode('null',"DENTER")
+null_denter.setInput(0,eye_mirror)
+dent_nodes.append(null_denter)
+
+vdbfrompolygons_dent:hou.Node  = geo.createNode('vdbfrompolygons')
+vdbfrompolygons_dent.setParms(
+    {
+        "voxelsize":0.01,
+    }
+)
+vdbfrompolygons_dent.setInput(0,null_denter)
+dent_nodes.append(vdbfrompolygons_dent)
+
+
+vdbcombine_dent:hou.Node  = geo.createNode('vdbcombine')
+vdbcombine_dent.setParms(
+    {
+        "operation":12,
+    }
+)
+vdbcombine_dent.setInput(0,vdbfrompolygons_dent)
+vdbcombine_dent.setInput(1,null_dented)
+dent_nodes.append(vdbcombine_dent)
+
+vdbreshapesdf_dent:hou.Node  = geo.createNode('vdbreshapesdf')
+vdbreshapesdf_dent.setParms(
+    {
+        "voxeloffset":2,
+    }
+)
+vdbreshapesdf_dent.setInput(0,vdbcombine_dent)
+dent_nodes.append(vdbreshapesdf_dent)
+
+vdbcombine_dent_union:hou.Node  = geo.createNode('vdbcombine')
+vdbcombine_dent_union.setParms(
+    {
+        "operation":11,
+    }
+)
+vdbcombine_dent_union.setInput(0,null_dented)
+vdbcombine_dent_union.setInput(1,vdbreshapesdf_dent)
+dent_nodes.append(vdbcombine_dent_union)
+
+
+vdbcombine_dent_subtract:hou.Node  = geo.createNode('vdbcombine')
+vdbcombine_dent_subtract.setParms(
+    {
+        "operation":13,
+    }
+)
+vdbcombine_dent_subtract.setInput(0,vdbcombine_dent_union)
+vdbcombine_dent_subtract.setInput(1,vdbfrompolygons_dent)
+dent_nodes.append(vdbcombine_dent_subtract)
+
+subnet_vdb_dent:hou.Node = geo.collapseIntoSubnet(dent_nodes,"VDB_DENT")
+
+group = subnet_vdb_dent.parmTemplateGroup()
+folder = hou.FolderParmTemplate("folder", "My Parms")
+float_parm = hou.FloatParmTemplate("myparm", "My Parm", 1)
+folder.addParmTemplate(float_parm)
+group.append(folder)
+subnet_vdb_dent.setParmTemplateGroup(group)
+
+
 #目をマージ
 merge:hou.Node  = geo.createNode('merge')
 merge.setInput(0,convertvdb)
@@ -362,6 +446,10 @@ disp_node.setDisplayFlag(True)
 for node in hou.node("/").allSubChildren():
     node.moveToGoodPosition()
 
+#更新実行
+hou.ui.triggerUpdate()
+hou.setUpdateMode(current_update_mode)
+hou.updateModeSetting()
     
 # 保存
 hou.hipFile.save("creating_a_mega_character.hip")
