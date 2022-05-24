@@ -9,16 +9,20 @@ if not 'HFS' in os.environ:
         su = connection.modules["viewerstate.utils"]
         #rpcのhouの値を使うとエラーが出る
         update_mode = connection.modules["hou"].updateMode.Manual
+        folder_type = connection.modules["hou"].parmTemplateType.Folder
     except:
         # 最後に定義されているhouのautocompleteが効くみたいなので例外側でインポート　
         import hou
         import sidefx_stroke
         import viewerstate.utils as su
         update_mode = hou.updateMode.Manual
+        folder_type = hou.parmTemplateType.Folder
 else:
     import hou
     import sidefx_stroke
     import viewerstate.utils as su
+    update_mode = hou.updateMode.Manual
+    folder_type = hou.parmTemplateType.Folder
 # https://www.youtube.com/playlist?list=PLXNFA1EysfYmpOEGcK1x_r6g_h2dOwAC4
 
 # ストローク作成ヘルパ
@@ -40,6 +44,17 @@ def create_stroke_raw_data(pos:list):
     # dataにセットする文字列
     str_data = stream.data().decode()
     return str_data
+
+def allParmTemplates(group_or_folder):
+    for parm_template in group_or_folder.parmTemplates():
+        yield parm_template
+
+    # multiparmブロック内のparmテンプレートを返したくないので、
+    # そのフォルダparmテンプレートが実際にフォルダ用なのか検証します。
+        if (parm_template.type() == folder_type and
+        parm_template.isActualFolder()):
+            for sub_parm_template in allParmTemplates(parm_template):
+                yield sub_parm_template
 
 
 hou.hipFile.clear(True)
@@ -344,28 +359,12 @@ vdbcombine_nose.setInput(0,vdbcombine_hair)
 vdbcombine_nose.setInput(1,paintsdfvolume_nose)
 
 
-# スムース
-vdbsmooth:hou.Node  = geo.createNode('vdbsmooth')
-vdbsmooth.setParms(
-    {
-        "iterations":4,
-    }
-)
-vdbsmooth.setInput(0,vdbcombine_nose)
 
-# ポリゴンに変換
-convertvdb:hou.Node  = geo.createNode('convertvdb')
-convertvdb.setParms(
-    {
-        "conversion":2,
-    }
-)
-convertvdb.setInput(0,vdbsmooth)
 
 # 目のへこみ
 dent_nodes = []
 null_dented:hou.Node  = geo.createNode('null',"DENTED")
-null_dented.setInput(0,vdbsmooth)
+null_dented.setInput(0,vdbcombine_nose)
 dent_nodes.append(null_dented)
 
 null_denter:hou.Node  = geo.createNode('null',"DENTER")
@@ -380,6 +379,7 @@ vdbfrompolygons_dent.setParms(
 )
 vdbfrompolygons_dent.setInput(0,null_denter)
 dent_nodes.append(vdbfrompolygons_dent)
+dent_voxel_node = vdbfrompolygons_dent.name()
 
 
 vdbcombine_dent:hou.Node  = geo.createNode('vdbcombine')
@@ -392,6 +392,7 @@ vdbcombine_dent.setInput(0,vdbfrompolygons_dent)
 vdbcombine_dent.setInput(1,null_dented)
 dent_nodes.append(vdbcombine_dent)
 
+
 vdbreshapesdf_dent:hou.Node  = geo.createNode('vdbreshapesdf')
 vdbreshapesdf_dent.setParms(
     {
@@ -400,6 +401,7 @@ vdbreshapesdf_dent.setParms(
 )
 vdbreshapesdf_dent.setInput(0,vdbcombine_dent)
 dent_nodes.append(vdbreshapesdf_dent)
+dent_shape_node = vdbreshapesdf_dent.name()
 
 vdbcombine_dent_union:hou.Node  = geo.createNode('vdbcombine')
 vdbcombine_dent_union.setParms(
@@ -421,16 +423,99 @@ vdbcombine_dent_subtract.setParms(
 vdbcombine_dent_subtract.setInput(0,vdbcombine_dent_union)
 vdbcombine_dent_subtract.setInput(1,vdbfrompolygons_dent)
 dent_nodes.append(vdbcombine_dent_subtract)
+dent_end_node = vdbcombine_dent_subtract.name()
 
+# サブネット作成
 subnet_vdb_dent:hou.Node = geo.collapseIntoSubnet(dent_nodes,"VDB_DENT")
 
-group = subnet_vdb_dent.parmTemplateGroup()
-folder = hou.FolderParmTemplate("folder", "My Parms")
-float_parm = hou.FloatParmTemplate("myparm", "My Parm", 1)
+group:hou.ParmTemplateGroup = subnet_vdb_dent.parmTemplateGroup()
+
+# 初期のパラメータを非表示に
+for template in allParmTemplates(group):
+    template.hide(True)
+    group.replace(template.name(),template)
+
+folder = hou.FolderParmTemplate("folder", "Dent")
+float_parm = hou.FloatParmTemplate("voxel_size", "Voxel Size", 1)
+float_parm.setDefaultValue([0.01])
+folder.addParmTemplate(float_parm)
+float_parm = hou.FloatParmTemplate("voxel_offset", "Voxel Offset", 1)
+float_parm.setDefaultValue([2.0])
 folder.addParmTemplate(float_parm)
 group.append(folder)
 subnet_vdb_dent.setParmTemplateGroup(group)
 
+#アウトプットの設定
+subnet_dent_end_node = subnet_vdb_dent.node(dent_end_node)
+
+subnet_output = subnet_vdb_dent.createNode("output")
+subnet_output.setInput(0,subnet_dent_end_node)
+subnet_output.setDisplayFlag(True)
+
+#エクスプレッションを設定
+subnet_dent_voxel_node = subnet_vdb_dent.node(dent_voxel_node)
+subnet_dent_voxel_node.setParmExpressions(
+    {
+        "voxelsize":f'ch("{subnet_dent_voxel_node.relativePathTo(subnet_vdb_dent)}/voxel_size")'
+    }
+)
+
+subnet_dent_shape_node = subnet_vdb_dent.node(dent_shape_node)
+subnet_dent_shape_node.setParmExpressions(
+    {
+        "voxeloffset":f'ch("{subnet_dent_shape_node.relativePathTo(subnet_vdb_dent)}/voxel_offset")'
+    }
+)
+
+subnet_vdb_dent.setParms(
+    {
+        "voxel_offset":7,
+    }
+)
+
+# HDA作成
+subnet_vdb_dent = subnet_vdb_dent.createDigitalAsset("vdb_dent","vdb_dent.hda",min_num_inputs=2,max_num_inputs=2)
+definition = subnet_vdb_dent.type().definition()
+definition.setParmTemplateGroup(group)
+
+# 口の作成
+mouth_shape:hou.Node  = geo.createNode('sphere')
+mouth_shape.setParms({
+    "type":2,
+    "rad":(1.0,0.2,1.0),
+    "t":(0.0,1.4,0.9),
+    "r":(35,0.0,0.0),
+    "scale":0.6,
+    "rows":50,
+    "cols":50,
+})
+
+mouth_dent = geo.createNode('vdb_dent')
+mouth_dent.setParms(
+    {
+        "voxel_offset":3.5,
+    }
+)
+mouth_dent.setInput(0,subnet_vdb_dent)
+mouth_dent.setInput(1,mouth_shape)
+
+# スムース
+vdbsmooth:hou.Node  = geo.createNode('vdbsmooth')
+vdbsmooth.setParms(
+    {
+        "iterations":4,
+    }
+)
+vdbsmooth.setInput(0,mouth_dent)
+
+# ポリゴンに変換
+convertvdb:hou.Node  = geo.createNode('convertvdb')
+convertvdb.setParms(
+    {
+        "conversion":2,
+    }
+)
+convertvdb.setInput(0,vdbsmooth)
 
 #目をマージ
 merge:hou.Node  = geo.createNode('merge')
