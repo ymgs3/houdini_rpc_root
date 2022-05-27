@@ -10,6 +10,7 @@ if not 'HFS' in os.environ:
         #rpcのhouの値を使うとエラーが出る
         update_mode = connection.modules["hou"].updateMode.Manual
         folder_type = connection.modules["hou"].parmTemplateType.Folder
+        ramp_basis_linear = connection.modules["hou"].rampBasis.Linear
     except:
         # 最後に定義されているhouのautocompleteが効くみたいなので例外側でインポート　
         import hou
@@ -17,6 +18,7 @@ if not 'HFS' in os.environ:
         import viewerstate.utils as su
         update_mode = hou.updateMode.Manual
         folder_type = hou.parmTemplateType.Folder
+        ramp_basis_linear = hou.rampBasis.Linear
 else:
     import hou
     import sidefx_stroke
@@ -517,12 +519,75 @@ convertvdb.setParms(
 )
 convertvdb.setInput(0,vdbsmooth)
 
+# リトポロジー
+exoside_quadremesher:hou.Node  = geo.createNode('exoside_quadremesher')
+exoside_quadremesher.setInput(0,convertvdb)
+
+# 色設定
+
+eye_mirror
+eye_color:hou.Node  = geo.createNode('color')
+eye_color.setParms(
+    {
+        "color":(1.0,0.25,0.25),
+    }
+)
+eye_color.setInput(0,eye_mirror)
+
+color:hou.Node  = geo.createNode('color')
+color.setParms(
+    {
+        "color":(0.95,0.4,0.2),
+    }
+)
+color.setInput(0,exoside_quadremesher)
+
+rampData = hou.Ramp((ramp_basis_linear, ramp_basis_linear), (0, 1), ((0.7,1.2,0.25), (0.95,0.4,0.2)))
+
+attribadjustcolor:hou.Node  = geo.createNode('attribadjustcolor')
+attribadjustcolor.setParms(
+    {
+        "adjustvalue":True,
+        "valuetype":8,
+        "colorramp":rampData,
+        "bounddir":1,
+
+    }
+)
+attribadjustcolor.setInput(0,color)
+
+attribtransfer = geo.createNode('attribtransfer')
+
+attribtransfer.setParms(
+    {
+        "primitiveattribs":False,
+        "pointattriblist":"Cd",
+        "thresholddist":0.0,
+        "blendwidth":0.1,
+    }
+)
+attribtransfer.setInput(0,attribadjustcolor)
+attribtransfer.setInput(1,eye_color)
+
+
+#nullの設定
+null_body:hou.Node  = geo.createNode('null',"BODY")
+null_body.setInput(0,attribtransfer)
+
+null_eyes:hou.Node  = geo.createNode('null',"EYES")
+null_eyes.setInput(0,eye_mirror)
+
+
 #目をマージ
 merge:hou.Node  = geo.createNode('merge')
-merge.setInput(0,convertvdb)
-merge.setInput(1,eye_mirror)
+merge.setInput(0,null_body)
+merge.setInput(1,null_eyes)
 
-disp_node = merge
+#最終出力
+null_chara:hou.Node  = geo.createNode('null',"OUT_CHARACTER")
+null_chara.setInput(0,merge)
+
+disp_node = null_chara
 
 # 表示するノードの設定
 disp_node.setDisplayFlag(True)
