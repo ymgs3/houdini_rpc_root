@@ -584,13 +584,128 @@ merge.setInput(0,null_body)
 merge.setInput(1,null_eyes)
 
 #最終出力
-null_chara:hou.Node  = geo.createNode('null',"OUT_CHARACTER")
+null_chara:hou.SopNode  = geo.createNode('null',"OUT_CHARACTER")
 null_chara.setInput(0,merge)
 
-disp_node = null_chara
+
+python = geo.createNode('python')
+code = '''
+node = hou.pwd()
+geo = node.geometry()
+
+import kinefx.rigapi as rigapi
+import kinefx__skeletonstate.utils as utils
+import kinefx__skeletonstate.state as state
+
+
+# Add code to modify contents of geo.
+# Use drop down menu to select examples.
+
+new_geo = hou.Geometry()
+state.SkeletonState._createPointAttributes(new_geo)
+
+data = [
+    {"P":(0.0,0.85,0.0),"name":"hip","parent":None},
+    {"P":(0.5,0.65,0.015),"name":"leg_L","parent":0},
+    {"P":(0.5,0.42,0.115),"name":"knee_L","parent":1},
+    {"P":(0.5,0.13,0.015),"name":"foot_L","parent":2},
+    {"P":(0.5,0.13,0.4),"name":"foot_tip_L","parent":3},
+    {"P":(0.5,0.13,0.6),"name":"toe_L","parent":4},
+    {"P":(0.0,1.25,0.0),"name":"chest","parent":0},
+    {"P":(0.77,1.45,0.0),"name":"clav_L","parent":6},
+    {"P":(0.97,1.45,0.0),"name":"shoulder_L","parent":7},
+    {"P":(1.18,1.23,-0.01),"name":"elbow_L","parent":8},
+    {"P":(1.3,1.08,0.0),"name":"hand_L","parent":9},
+    {"P":(1.41,1.09,0.0),"name":"thumb_L","parent":10},
+    {"P":(1.5,1.09,0.0),"name":"thumb_tip_L","parent":11},
+    {"P":(1.42,1.01,0.0),"name":"index_L","parent":10},
+    {"P":(1.53,0.95,0.0),"name":"index_tip_L","parent":13},
+    {"P":(1.38,0.96,0.0),"name":"third_finger_L","parent":10},
+    {"P":(1.45,0.85,0.0),"name":"third_finger_tip_L","parent":15},
+    {"P":(1.30,0.93,0.0),"name":"pinky_L","parent":10},
+    {"P":(1.30,0.85,0.0),"name":"pinky_tip_L","parent":17},
+    {"P":(0.0,2.0,0.0),"name":"head","parent":6},
+    {"P":(0.0,2.6,0.0),"name":"head_tip","parent":19},
+    {"P":(0.0,1.18,0.24),"name":"jaw","parent":6},
+    {"P":(0.0,1.11,0.59),"name":"jaw2","parent":21},
+    {"P":(0.0,1.20,0.86),"name":"mouth_bot","parent":22},
+]
+
+for d in data:
+    position = hou.Vector3(d["P"])
+    name = d["name"]
+    parent_idx = d["parent"]
+    parent = None
+    if parent_idx is not None:
+        parent = new_geo.points()[parent_idx]
+    pt = utils.addPoint(new_geo,parent=parent,position=position)
+    pt.setAttribValue("name",name)
+
+
+# eval_ordとparent_idxがないのはrigdoctorで対処
+
+geo.copy(new_geo)
+'''
+python.setParms(
+    {
+        "python":code,
+    }
+)
+python.setInput(0,null_chara)
+
+box = geo.createNode('box')
+box.setParms(
+    {
+        "type":1,
+        "size":(1.8,3.45,1.37),
+        "t":(1.1,1.65,0.0),
+        "divrate":(2,2,2),
+    }
+)
+
+group_left_side = geo.createNode('groupcreate')
+group_left_side.setParms(
+    {
+        "groupname":"leftside",
+        "grouptype":1,
+        "groupbase":False,
+        "groupbounding":True,
+        "boundtype":2,
+    }
+)
+group_left_side.setInput(0,python)
+group_left_side.setInput(1,box)
+
+skeletonmirror = geo.createNode('skeletonmirror')
+skeletonmirror.setParms(
+    {
+        "group":"leftside",
+        "tokenpos":2,
+        "findtokens":"_L",
+        "replacetokens":"_R",
+    }
+)
+skeletonmirror.setInput(0,group_left_side)
+
+
+rigdoctor = geo.createNode('rigdoctor')
+rigdoctor.setParms(
+    {
+        "outputparentidx":True,
+        "outputevalord":True,
+        "inittransforms":True,
+        "reorienttochild":True,
+    }
+)
+rigdoctor.setInput(0,skeletonmirror)
+
+
+disp_node = rigdoctor
+template_node = null_chara
 
 # 表示するノードの設定
 disp_node.setDisplayFlag(True)
+template_node.setTemplateFlag(True)
 
 # 全ノードをいい位置に移動
 for node in hou.node("/").allSubChildren():
