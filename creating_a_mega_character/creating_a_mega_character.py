@@ -11,6 +11,8 @@ if not 'HFS' in os.environ:
         update_mode = connection.modules["hou"].updateMode.Manual
         folder_type = connection.modules["hou"].parmTemplateType.Folder
         ramp_basis_linear = connection.modules["hou"].rampBasis.Linear
+        Matrix4 = connection.modules["hou"].Matrix4
+        Matrix3 = connection.modules["hou"].Matrix3
     except:
         # 最後に定義されているhouのautocompleteが効くみたいなので例外側でインポート　
         import hou
@@ -19,6 +21,8 @@ if not 'HFS' in os.environ:
         update_mode = hou.updateMode.Manual
         folder_type = hou.parmTemplateType.Folder
         ramp_basis_linear = hou.rampBasis.Linear
+        Matrix4 = hou.Matrix4
+        Matrix3 = hou.Matrix3
 else:
     import hou
     import sidefx_stroke
@@ -61,10 +65,13 @@ def allParmTemplates(group_or_folder):
 
 hou.hipFile.clear(True)
 
+change_update_mode = False
+
 #更新モードを変更
-current_update_mode = hou.updateModeSetting()
-hou.setUpdateMode(update_mode)
-hou.updateModeSetting()
+if change_update_mode:
+    current_update_mode = hou.updateModeSetting()
+    hou.setUpdateMode(update_mode)
+    hou.updateModeSetting()
 
 
 geo:hou.Node = hou.node("/obj").createNode('geo')
@@ -699,9 +706,101 @@ rigdoctor.setParms(
 )
 rigdoctor.setInput(0,skeletonmirror)
 
+# スキンウェイト
+jointcapturebiharmonic = geo.createNode('jointcapturebiharmonic')
+jointcapturebiharmonic.setInput(0,null_chara)
+jointcapturebiharmonic.setInput(1,rigdoctor)
+jointcapturebiharmonic.setInput(2,rigdoctor)
 
-disp_node = rigdoctor
-template_node = null_chara
+# リギング
+rigpose = geo.createNode('rigpose')
+rigpose.setInput(0,jointcapturebiharmonic,2)
+
+# 足リグ
+joint_geometry:hou.Geometry = jointcapturebiharmonic.geometry(2)
+leg_target = ["leg","knee","foot"]
+leg_target_result = []
+knee_trans = {}
+leg_chain = {}
+if joint_geometry.findPointAttrib("name") and joint_geometry.findPointAttrib("transform"):
+    for point in joint_geometry.points():
+        name:str = point.attribValue("name")
+        for target_name in leg_target:
+            if target_name in name:
+                leg_target_result.append(name)
+
+                # 膝
+                if target_name == "knee":
+                    transform = point.attribValue("transform")
+                    trans = point.attribValue("P")
+                    rot_matrix = Matrix4(Matrix3(transform))
+                    knee_trans[name] = rot_matrix.inverted()
+
+                # チェイン
+                chain_key = "chain" + name.replace(target_name,"")
+                chain_data = leg_chain.get(chain_key,{})
+                chain_data[target_name] = name
+                leg_chain[chain_key] = chain_data
+
+
+leg_group = "@name="+" @name=".join(leg_target_result)
+
+deletejoints_leg = geo.createNode('deletejoints')
+deletejoints_leg.setParms(
+    {
+        "group":leg_group,
+        "negate":1,
+    }
+)
+deletejoints_leg.setInput(0,jointcapturebiharmonic,2)
+
+rigpose_leg = geo.createNode('rigpose')
+rigpose_leg_parms = {
+    "worldspace":True,
+    "transformations":len(knee_trans),
+}
+for i,knee_name in enumerate(knee_trans.keys()):
+    matrix = knee_trans[knee_name]
+    rigpose_leg_parms["group" + str(i)] = "@name=" + knee_name
+    rigpose_leg_parms["t" + str(i)] = hou.Vector3(0.0, 0.0, 0.5) * matrix
+
+rigpose_leg.setParms(rigpose_leg_parms)
+rigpose_leg.setInput(0,deletejoints_leg)
+
+ikchains_leg = geo.createNode('ikchains')
+
+fixed_leg_chain = {}
+for chain_name in leg_chain.keys():
+    if len(leg_chain[chain_name]) == 3:
+        fixed_leg_chain[chain_name] = leg_chain[chain_name]
+
+ikchains_leg_parms = {
+    "ikchains":len(fixed_leg_chain),
+}
+for i,chain_name in enumerate(fixed_leg_chain.keys()):
+    ikchains_leg_parms["root" + str(i + 1)] = fixed_leg_chain[chain_name]["leg"]
+    ikchains_leg_parms["mid" + str(i + 1)] = fixed_leg_chain[chain_name]["knee"]
+    ikchains_leg_parms["tip" + str(i + 1)] = fixed_leg_chain[chain_name]["foot"]
+    ikchains_leg_parms["matchbyname" + str(i+1)] = True
+    ikchains_leg_parms["orienttip" + str(i+1)] = True
+    ikchains_leg_parms["stretch" + str(i+1)] = True
+
+ikchains_leg.setParms(ikchains_leg_parms)
+ikchains_leg.setInput(0,rigpose)
+ikchains_leg.setInput(1,rigpose_leg)
+
+# 変形
+bonedeform = geo.createNode('bonedeform')
+bonedeform.setInput(0,jointcapturebiharmonic)
+bonedeform.setInput(1,jointcapturebiharmonic,1)
+bonedeform.setInput(2,ikchains_leg)
+
+deltamush = geo.createNode('deltamush')
+deltamush.setInput(0,bonedeform)
+deltamush.setInput(1,null_chara)
+
+disp_node = deltamush
+template_node = deltamush
 
 # 表示するノードの設定
 disp_node.setDisplayFlag(True)
@@ -712,9 +811,10 @@ for node in hou.node("/").allSubChildren():
     node.moveToGoodPosition()
 
 #更新実行
-hou.ui.triggerUpdate()
-hou.setUpdateMode(current_update_mode)
-hou.updateModeSetting()
+if change_update_mode:
+    hou.ui.triggerUpdate()
+    hou.setUpdateMode(current_update_mode)
+    hou.updateModeSetting()
     
 # 保存
 hou.hipFile.save("creating_a_mega_character.hip")
