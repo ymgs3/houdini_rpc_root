@@ -716,74 +716,146 @@ jointcapturebiharmonic.setInput(2,rigdoctor)
 rigpose = geo.createNode('rigpose')
 rigpose.setInput(0,jointcapturebiharmonic,2)
 
-# 足リグ
+# リグ
+rig_target_result = []
+bone_inverted_trans = {}
 joint_geometry:hou.Geometry = jointcapturebiharmonic.geometry(2)
+# 足
 leg_target = ["leg","knee","foot"]
-leg_target_result = []
-knee_trans = {}
+leg_ignore_target = ["foot_tip"]
+knee_trans_name = []
 leg_chain = {}
+# 腕
+arm_target = ["shoulder","elbow","hand"]
+arm_ignore_target = []
+elbow_trans_name = []
+arm_chain = {}
+
 if joint_geometry.findPointAttrib("name") and joint_geometry.findPointAttrib("transform"):
     for point in joint_geometry.points():
         name:str = point.attribValue("name")
-        for target_name in leg_target:
-            if target_name in name:
-                leg_target_result.append(name)
+        is_target = False
+        # 足の情報取得
+        leg_skip = False
+        for ignore in leg_ignore_target:
+            if ignore in name:
+                leg_skip = True
+                break
+        if not leg_skip:
+            for target_name in leg_target:
+                if target_name in name:
+                    is_target = True
+                    # 膝
+                    if target_name == "knee":
+                        knee_trans_name.append(name)
 
-                # 膝
-                if target_name == "knee":
-                    transform = point.attribValue("transform")
-                    trans = point.attribValue("P")
-                    rot_matrix = Matrix4(Matrix3(transform))
-                    knee_trans[name] = rot_matrix.inverted()
+                    # チェイン
+                    chain_key = "chain_leg" + name.replace(target_name,"")
+                    chain_data = leg_chain.get(chain_key,{})
+                    chain_data[target_name] = name
+                    leg_chain[chain_key] = chain_data
+        #腕の情報取得
+        arm_skip = False
+        for ignore in arm_ignore_target:
+            if ignore in name:
+                arm_skip = True
+                break
+        if not arm_skip:
+            for target_name in arm_target:
+                if target_name in name:
+                    is_target = True
+                    # 肘
+                    if target_name == "elbow":
+                        elbow_trans_name.append(name)
 
-                # チェイン
-                chain_key = "chain" + name.replace(target_name,"")
-                chain_data = leg_chain.get(chain_key,{})
-                chain_data[target_name] = name
-                leg_chain[chain_key] = chain_data
+                    # チェイン
+                    chain_key = "chain_arm" + name.replace(target_name,"")
+                    chain_data = arm_chain.get(chain_key,{})
+                    chain_data[target_name] = name
+                    arm_chain[chain_key] = chain_data
+                    
+        # 変換用の行列保存
+        if is_target:
+            rig_target_result.append(name)
+            transform = point.attribValue("transform")
+            rot_matrix = Matrix4(Matrix3(transform))
+            bone_inverted_trans[name] = rot_matrix.inverted()
 
-
-leg_group = "@name="+" @name=".join(leg_target_result)
+# チェーンで使用するボーン
+rig_group = "@name="+" @name=".join(rig_target_result)
 
 deletejoints_leg = geo.createNode('deletejoints')
 deletejoints_leg.setParms(
     {
-        "group":leg_group,
+        "group":rig_group,
         "negate":1,
     }
 )
 deletejoints_leg.setInput(0,jointcapturebiharmonic,2)
 
+# ボーンの位置設定
 rigpose_leg = geo.createNode('rigpose')
 rigpose_leg_parms = {
     "worldspace":True,
-    "transformations":len(knee_trans),
+    "transformations":len(knee_trans_name) + len(elbow_trans_name),
 }
-for i,knee_name in enumerate(knee_trans.keys()):
-    matrix = knee_trans[knee_name]
-    rigpose_leg_parms["group" + str(i)] = "@name=" + knee_name
-    rigpose_leg_parms["t" + str(i)] = hou.Vector3(0.0, 0.0, 0.5) * matrix
+
+offset = 0
+# 足
+for knee_name in knee_trans_name:
+    matrix = bone_inverted_trans[knee_name]
+    rigpose_leg_parms["group" + str(offset)] = "@name=" + knee_name
+    rigpose_leg_parms["t" + str(offset)] = hou.Vector3(0.0, 0.0, 0.5) * matrix
+    offset += 1
+# 腕
+for elbow_name in elbow_trans_name:
+    matrix = bone_inverted_trans[elbow_name]
+    rigpose_leg_parms["group" + str(offset)] = "@name=" + elbow_name
+    rigpose_leg_parms["t" + str(offset)] = hou.Vector3(0.0, 0.0, -0.5) * matrix
+    offset += 1
 
 rigpose_leg.setParms(rigpose_leg_parms)
 rigpose_leg.setInput(0,deletejoints_leg)
 
+# IK設定
 ikchains_leg = geo.createNode('ikchains')
 
+# 足
 fixed_leg_chain = {}
 for chain_name in leg_chain.keys():
     if len(leg_chain[chain_name]) == 3:
         fixed_leg_chain[chain_name] = leg_chain[chain_name]
 
+# 腕
+fixed_arm_chain = {}
+for chain_name in arm_chain.keys():
+    if len(arm_chain[chain_name]) == 3:
+        fixed_arm_chain[chain_name] = arm_chain[chain_name]
+
 ikchains_leg_parms = {
-    "ikchains":len(fixed_leg_chain),
+    "ikchains":len(fixed_leg_chain) + len(fixed_arm_chain),
 }
-for i,chain_name in enumerate(fixed_leg_chain.keys()):
-    ikchains_leg_parms["root" + str(i + 1)] = fixed_leg_chain[chain_name]["leg"]
-    ikchains_leg_parms["mid" + str(i + 1)] = fixed_leg_chain[chain_name]["knee"]
-    ikchains_leg_parms["tip" + str(i + 1)] = fixed_leg_chain[chain_name]["foot"]
-    ikchains_leg_parms["matchbyname" + str(i+1)] = True
-    ikchains_leg_parms["orienttip" + str(i+1)] = True
-    ikchains_leg_parms["stretch" + str(i+1)] = True
+
+offset = 0
+# 足
+for chain_name in fixed_leg_chain.keys():
+    ikchains_leg_parms["root" + str(offset + 1)] = fixed_leg_chain[chain_name]["leg"]
+    ikchains_leg_parms["mid" + str(offset + 1)] = fixed_leg_chain[chain_name]["knee"]
+    ikchains_leg_parms["tip" + str(offset + 1)] = fixed_leg_chain[chain_name]["foot"]
+    ikchains_leg_parms["matchbyname" + str(offset+1)] = True
+    ikchains_leg_parms["orienttip" + str(offset+1)] = True
+    ikchains_leg_parms["stretch" + str(offset+1)] = True
+    offset += 1
+    
+# 腕
+for chain_name in fixed_arm_chain.keys():
+    ikchains_leg_parms["root" + str(offset + 1)] = fixed_arm_chain[chain_name]["shoulder"]
+    ikchains_leg_parms["mid" + str(offset + 1)] = fixed_arm_chain[chain_name]["elbow"]
+    ikchains_leg_parms["tip" + str(offset + 1)] = fixed_arm_chain[chain_name]["hand"]
+    ikchains_leg_parms["matchbyname" + str(offset+1)] = True
+    ikchains_leg_parms["orienttip" + str(offset+1)] = True
+    ikchains_leg_parms["stretch" + str(offset+1)] = True
+    offset += 1
 
 ikchains_leg.setParms(ikchains_leg_parms)
 ikchains_leg.setInput(0,rigpose)
