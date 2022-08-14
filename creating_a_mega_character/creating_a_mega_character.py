@@ -527,8 +527,19 @@ convertvdb.setParms(
 convertvdb.setInput(0,vdbsmooth)
 
 # リトポロジー
-exoside_quadremesher:hou.Node  = geo.createNode('exoside_quadremesher')
-exoside_quadremesher.setInput(0,convertvdb)
+remesh:hou.Node  = geo.createNode('remesh')
+remesh.setParms(
+    {
+        "sizing":1,
+        "inputptsonly":True,
+        "density":1.0,
+        "gradation":1.0,
+    }
+)
+remesh.setInput(0,convertvdb)
+#exoside_quadremesher:hou.Node  = geo.createNode('exoside_quadremesher')
+#exoside_quadremesher.setInput(0,convertvdb)
+retop_node = remesh
 
 # 色設定
 
@@ -547,7 +558,7 @@ color.setParms(
         "color":(0.95,0.4,0.2),
     }
 )
-color.setInput(0,exoside_quadremesher)
+color.setInput(0,retop_node)
 
 rampData = hou.Ramp((ramp_basis_linear, ramp_basis_linear), (0, 1), ((0.7,1.2,0.25), (0.95,0.4,0.2)))
 
