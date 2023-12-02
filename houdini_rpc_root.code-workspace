@@ -5,11 +5,11 @@
 		}
 	],
 	"settings": {
-		"python.pythonPath": "C:/Program Files/Side Effects Software/Houdini 19.0.589/python37/python3.7.exe",
+		"python.pythonPath": "C:/Program Files/Side Effects Software/Houdini 20.0.506/python310/python3.10.exe",
 		"python.autoComplete.extraPaths": [
-			"C:/Program Files/Side Effects Software/Houdini 19.0.589/houdini/python3.7libs",
-			"C:/Program Files/Side Effects Software/Houdini 19.0.589/houdini/viewer_states",
-			"C:/Program Files/Side Effects Software/Houdini 19.0.589/python37/libs",
+			"C:/Program Files/Side Effects Software/Houdini 20.0.506//houdini/python3.10libs",
+			"C:/Program Files/Side Effects Software/Houdini 20.0.506//houdini/viewer_states",
+			"C:/Program Files/Side Effects Software/Houdini 20.0.506/python310/libs",
 		]
 	}
 }

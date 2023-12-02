@@ -527,13 +527,10 @@ convertvdb.setParms(
 convertvdb.setInput(0,vdbsmooth)
 
 # リトポロジー
-remesh:hou.Node  = geo.createNode('remesh')
+remesh:hou.Node  = geo.createNode('quadremesh')
 remesh.setParms(
     {
-        "sizing":1,
-        "inputptsonly":True,
-        "density":1.0,
-        "gradation":1.0,
+        "targetquadcount":30000,
     }
 )
 remesh.setInput(0,convertvdb)
